@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>SkyFlow</title>
+    <meta name="description" content="SkyFlow — global weather forecast with current conditions, hourly and 16-day outlook.">
+
+    <!-- PWA -->
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#0f2027">
+    <meta name="application-name" content="SkyFlow">
+
+    <!-- iOS PWA support -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SkyFlow">
+    <link rel="apple-touch-icon" href="./icon-180.png">
+
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="./icon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="./icon-16.png">
+    <link rel="icon" type="image/png" href="./favicon.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        glass: 'rgba(255, 255, 255, 0.15)',
+                        glassDark: 'rgba(0, 0, 0, 0.2)',
+                        glassActive: 'rgba(255, 255, 255, 0.25)',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        html {
+            background-color: #0f2027;
+            overscroll-behavior-y: none;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            min-height: 100vh;
+            overscroll-behavior-y: none;
+        }
+
+        .glass-panel {
+            background: var(--tw-colors-glass);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+        }
+
+        .glass-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.2s ease;
+        }
+
+        /* Removed hover translateY for all glass-items to prevent layout jumping */
+        .glass-item:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Added specific hover effect only for interactive daily cards */
+        #daily-container .glass-item:hover {
+            transform: translateY(-2px);
+        }
+
+        .glass-item.active {
+            background: rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.5);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        /* Scrollbar hiding */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Custom scrollbar for search results */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0,0,0,0.1);
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.3);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="text-white flex items-center justify-center p-4 antialiased sm:p-8">
+
+    <main class="w-full max-w-4xl glass-panel rounded-3xl overflow-hidden relative min-h-[700px] flex flex-col">
+        
+        <!-- Search & Navigation Bar -->
+        <div class="p-6 border-b border-white/10 bg-black/20 relative z-40">
+            <div class="flex flex-col md:flex-row gap-4 justify-between items-center relative">
+                
+                <!-- Brand -->
+                <div class="flex items-center gap-2 flex-shrink-0 self-start md:self-center">
+                    <img src="./icon-32.png" alt="SkyFlow" class="w-6 h-6 rounded-md">
+                    <span class="text-lg font-bold tracking-tight text-white">SkyFlow</span>
+                </div>
+
+                <!-- Pinned Locations -->
+                <div class="flex-1 w-full overflow-x-auto hide-scrollbar flex items-center gap-2 pb-2 md:pb-0" id="pinned-container">
+                    <!-- Pinned chips injected here -->
+                </div>
+
+                <!-- Search Input -->
+                <div class="relative w-full md:w-72 flex-shrink-0">
+                    <div class="relative">
+                        <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-white/50"></i>
+                        <input type="text" id="search-input" placeholder="Search city..." 
+                            class="w-full bg-white/10 border border-white/20 rounded-full py-2.5 pl-11 pr-4 text-sm text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400/50 transition-all">
+                        <button id="clear-search" class="absolute right-4 top-1/2 -translate-y-1/2 text-white/50 hover:text-white hidden">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    </div>
+                    
+                    <!-- Search Results Dropdown -->
+                    <div id="search-results" class="absolute top-full mt-2 w-full bg-[#203a43] border border-white/20 rounded-xl shadow-2xl overflow-hidden hidden max-h-60 custom-scrollbar overflow-y-auto">
+                        <!-- Results injected here -->
+                        <div class="p-4 text-center text-sm text-white/50" id="search-loading">Searching...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Global Loading State -->
+        <div id="loading-state" class="absolute inset-0 flex flex-col items-center justify-center z-30 bg-[#203a43]/90 backdrop-blur-md">
+            <div class="spinner mb-4"></div>
+            <p class="text-lg font-medium tracking-wide">Fetching Weather Data...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="error-state" class="hidden absolute inset-0 flex flex-col items-center justify-center z-30 bg-red-900/90 backdrop-blur-md p-6 text-center">
+            <i class="fa-solid fa-triangle-exclamation text-5xl mb-4 text-red-300"></i>
+            <h2 class="text-2xl font-bold mb-2">Oops! Something went wrong.</h2>
+            <p id="error-message" class="text-red-100 mb-6">Could not retrieve weather data.</p>
+            <button onclick="retryFetch()" class="px-6 py-2 bg-white/20 hover:bg-white/30 rounded-full transition border border-white/30">
+                Try Again
+            </button>
+        </div>
+
+        <!-- Content Container -->
+        <div id="weather-content" class="hidden flex-col h-full opacity-0 transition-opacity duration-500 overflow-y-auto hide-scrollbar">
+            
+            <!-- Header & Current Weather -->
+            <div class="p-6 md:p-8 flex flex-col md:flex-row justify-between items-start md:items-center relative overflow-hidden">
+                <div class="absolute -top-24 -right-24 w-64 h-64 bg-yellow-400 rounded-full mix-blend-overlay filter blur-3xl opacity-20 pointer-events-none" id="weather-glow"></div>
+                <div class="flex items-center gap-3 mb-1">
+                    <h1 class="text-3xl md:text-4xl font-bold flex items-center gap-2" id="location-name">
+                        --
+                    </h1>
+                    <button id="pin-btn" class="w-8 h-8 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 transition-colors text-white/50 hover:text-yellow-400" title="Pin Location">
+                        <i class="fa-solid fa-thumbtack"></i>
+                    </button>
+                </div>
+                <div class="flex items-center gap-3 mt-1">
+                    <p class="text-gray-300 text-sm md:text-base font-medium tracking-wide" id="current-date">--</p>
+                    <button id="today-btn" onclick="goToToday()" class="hidden text-xs bg-[#3b4b52] hover:bg-[#4a5c64] text-white px-3 py-1 rounded-full transition-colors border border-[#4a5c64]">Today</button>
+                </div>
+            </div>
+
+            <div class="mt-2 md:mt-0 px-6 md:px-8 flex items-center gap-6">
+                <div id="current-icon-container" class="text-6xl md:text-7xl text-yellow-300 drop-shadow-lg">
+                    <i class="fa-solid fa-sun"></i>
+                </div>
+                <div>
+                    <div class="flex items-start">
+                        <span id="current-temp" class="text-6xl md:text-7xl font-bold tracking-tighter">--</span>
+                        <span class="text-2xl font-medium mt-2 text-white/70">°C</span>
+                    </div>
+                    <p id="current-desc" class="text-lg md:text-xl font-medium text-gray-200 capitalize">--</p>
+                </div>
+            </div>
+
+            <!-- Current Details Grid -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 px-4 md:px-8 mb-6 md:mb-8 mt-4 md:mt-6">
+                <!-- Wind Card -->
+                <div class="flex items-center gap-3 md:gap-4 p-3 md:p-4 rounded-xl bg-transparent md:bg-white/5 border-none md:border md:border-white/10 md:shadow-sm backdrop-blur-sm">
+                    <div class="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/10 flex items-center justify-center text-white/70">
+                        <i class="fa-solid fa-wind text-sm md:text-lg"></i>
+                    </div>
+                    <div class="flex flex-col justify-center">
+                        <div class="text-[9px] md:text-[10px] text-white/50 font-semibold tracking-wider uppercase mb-0.5">Wind</div>
+                        <div id="current-wind" class="font-bold text-sm md:text-lg text-white">--</div>
+                    </div>
+                </div>
+                <!-- Humidity Card -->
+                <div class="flex items-center gap-3 md:gap-4 p-3 md:p-4 rounded-xl bg-transparent md:bg-white/5 border-none md:border md:border-white/10 md:shadow-sm backdrop-blur-sm">
+                    <div class="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/10 flex items-center justify-center text-blue-300">
+                        <i class="fa-solid fa-droplet text-sm md:text-lg"></i>
+                    </div>
+                    <div class="flex flex-col justify-center">
+                        <div class="text-[9px] md:text-[10px] text-white/50 font-semibold tracking-wider uppercase mb-0.5">Humidity</div>
+                        <div id="current-humidity" class="font-bold text-sm md:text-lg text-white">--</div>
+                    </div>
+                </div>
+                <!-- Feels Like Card -->
+                <div class="flex items-center gap-3 md:gap-4 p-3 md:p-4 rounded-xl bg-transparent md:bg-white/5 border-none md:border md:border-white/10 md:shadow-sm backdrop-blur-sm">
+                    <div class="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/10 flex items-center justify-center text-orange-300">
+                        <i class="fa-solid fa-temperature-half text-sm md:text-lg"></i>
+                    </div>
+                    <div class="flex flex-col justify-center">
+                        <div class="text-[9px] md:text-[10px] text-white/50 font-semibold tracking-wider uppercase mb-0.5">Feels Like</div>
+                        <div id="current-feels-like" class="font-bold text-sm md:text-lg text-white">--</div>
+                    </div>
+                </div>
+                <!-- Pressure Card -->
+                <div class="flex items-center gap-3 md:gap-4 p-3 md:p-4 rounded-xl bg-transparent md:bg-white/5 border-none md:border md:border-white/10 md:shadow-sm backdrop-blur-sm">
+                    <div class="w-8 h-8 md:w-10 md:h-10 rounded-full bg-white/10 flex items-center justify-center text-purple-300">
+                        <i class="fa-solid fa-gauge-high text-sm md:text-lg"></i>
+                    </div>
+                    <div class="flex flex-col justify-center">
+                        <div class="text-[9px] md:text-[10px] text-white/50 font-semibold tracking-wider uppercase mb-0.5">Pressure</div>
+                        <div id="current-pressure" class="font-bold text-sm md:text-lg text-white">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hourly Forecast (Dynamic based on selected day) -->
+            <div class="px-4 md:px-8 mb-4 md:mb-6">
+                <div class="flex justify-between items-end mb-2 md:mb-3">
+                    <h3 class="text-base md:text-lg font-semibold flex items-center gap-2 text-white">
+                        <i class="fa-regular fa-clock text-[#8e9a9f]"></i>
+                        Hourly Forecast
+                    </h3>
+                    <span id="hourly-day-label" class="text-[10px] md:text-xs text-[#8e9a9f] bg-white/10 px-2 md:px-3 py-0.5 md:py-1 rounded-full border border-white/10">Today</span>
+                </div>
+                <div class="rounded-xl md:rounded-2xl px-1 md:px-2 py-1.5 md:py-2 bg-white/5 border border-white/10 shadow-sm backdrop-blur-sm">
+                    <div class="flex gap-1.5 md:gap-2 overflow-x-auto hide-scrollbar pb-1 cursor-grab select-none relative" id="hourly-container">
+                        <!-- Hourly items injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 16-Day Forecast -->
+            <div class="px-4 md:px-8 pb-4 md:pb-6 flex-1">
+                <h3 class="text-base md:text-lg font-semibold mb-1 flex items-center gap-2 text-white">
+                    <i class="fa-regular fa-calendar-days text-[#8e9a9f]"></i>
+                    16-Day Forecast <span class="text-xs md:text-sm font-normal text-[#8e9a9f] ml-1 md:ml-2">(Click to view hourly)</span>
+                </h3>
+                <div class="flex gap-2 md:gap-3 overflow-x-auto hide-scrollbar cursor-grab select-none relative py-2 md:py-4 px-1 md:px-2 -mx-1 md:-mx-2" id="daily-container">
+                    <!-- Daily items injected here -->
+                </div>
+            </div>
+            
+            <div class="px-6 py-4 text-center text-xs text-white/40 bg-black/20 mt-auto">
+                SkyFlow &bull; Weather data provided by Open-Meteo API &bull; Geocoding by Open-Meteo
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- STATE MANAGEMENT ---
+        let appState = {
+            currentLocation: {
+                id: 519178,
+                name: "Smolensk",
+                country: "Russia",
+                latitude: 54.7818,
+                longitude: 32.0401,
+                timezone: "Europe/Moscow"
+            },
+            pinnedLocations: [],
+            weatherData: null,
+            selectedDayIndex: 0 // 0 = today, 1 = tomorrow, up to 15
+        };
+
+        // --- CONSTANTS & MAPPINGS ---
+        const WEATHER_API_URL = "https://api.open-meteo.com/v1/forecast";
+        const GEO_API_URL = "https://geocoding-api.open-meteo.com/v1/search";
+
+        const weatherCodeMap = {
+            0: { desc: 'Clear sky', icon: 'fa-sun', color: 'text-yellow-400', glow: 'bg-yellow-400' },
+            1: { desc: 'Mainly clear', icon: 'fa-cloud-sun', color: 'text-yellow-200', glow: 'bg-yellow-200' },
+            2: { desc: 'Partly cloudy', icon: 'fa-cloud-sun', color: 'text-gray-200', glow: 'bg-gray-300' },
+            3: { desc: 'Overcast', icon: 'fa-cloud', color: 'text-gray-400', glow: 'bg-gray-500' },
+            45: { desc: 'Fog', icon: 'fa-smog', color: 'text-gray-300', glow: 'bg-gray-400' },
+            48: { desc: 'Rime fog', icon: 'fa-smog', color: 'text-gray-300', glow: 'bg-gray-400' },
+            51: { desc: 'Light drizzle', icon: 'fa-cloud-rain', color: 'text-blue-300', glow: 'bg-blue-400' },
+            53: { desc: 'Drizzle', icon: 'fa-cloud-rain', color: 'text-blue-400', glow: 'bg-blue-500' },
+            55: { desc: 'Heavy drizzle', icon: 'fa-cloud-showers-heavy', color: 'text-blue-500', glow: 'bg-blue-600' },
+            61: { desc: 'Light rain', icon: 'fa-cloud-rain', color: 'text-blue-400', glow: 'bg-blue-500' },
+            63: { desc: 'Moderate rain', icon: 'fa-cloud-showers-heavy', color: 'text-blue-500', glow: 'bg-blue-600' },
+            65: { desc: 'Heavy rain', icon: 'fa-cloud-showers-water', color: 'text-blue-600', glow: 'bg-blue-700' },
+            71: { desc: 'Light snow', icon: 'fa-snowflake', color: 'text-white', glow: 'bg-white' },
+            73: { desc: 'Snow', icon: 'fa-snowflake', color: 'text-white', glow: 'bg-white' },
+            75: { desc: 'Heavy snow', icon: 'fa-snowflake', color: 'text-white', glow: 'bg-white' },
+            77: { desc: 'Snow grains', icon: 'fa-snowflake', color: 'text-white', glow: 'bg-white' },
+            80: { desc: 'Rain showers', icon: 'fa-cloud-rain', color: 'text-blue-400', glow: 'bg-blue-400' },
+            81: { desc: 'Heavy showers', icon: 'fa-cloud-showers-heavy', color: 'text-blue-500', glow: 'bg-blue-500' },
+            82: { desc: 'Violent showers', icon: 'fa-cloud-showers-water', color: 'text-blue-600', glow: 'bg-blue-600' },
+            85: { desc: 'Snow showers', icon: 'fa-snowflake', color: 'text-white', glow: 'bg-white' },
+            86: { desc: 'Heavy snow showers', icon: 'fa-snowflake', color: 'text-white', glow: 'bg-white' },
+            95: { desc: 'Thunderstorm', icon: 'fa-cloud-bolt', color: 'text-purple-400', glow: 'bg-purple-500' },
+            96: { desc: 'Thunderstorm/hail', icon: 'fa-cloud-bolt', color: 'text-purple-500', glow: 'bg-purple-600' },
+            99: { desc: 'Heavy thunderstorm', icon: 'fa-cloud-bolt', color: 'text-purple-600', glow: 'bg-purple-700' },
+        };
+
+        // --- STREAMING_CHUNK:Helper Functions ---
+        function getWeatherInfo(code, isDay = 1) {
+            const info = weatherCodeMap[code] || { desc: 'Unknown', icon: 'fa-cloud', color: 'text-gray-300', glow: 'bg-gray-400' };
+            let icon = info.icon;
+            
+            // Adjust icons for nighttime clear/cloudy
+            if (isDay === 0) {
+                if (code === 0) icon = 'fa-moon';
+                if (code === 1 || code === 2) icon = 'fa-cloud-moon';
+            }
+            return { ...info, icon };
+        }
+
+        function formatTime(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleTimeString('en-US', { hour: 'numeric' });
+        }
+
+        function getDayName(isoString, index) {
+            if (index === 0) return 'Today';
+            if (index === 1) return 'Tomorrow';
+            const date = new Date(isoString);
+            return date.toLocaleDateString('en-US', { weekday: 'short' });
+        }
+
+        function loadFromLocalStorage() {
+            const storedPins = localStorage.getItem('weatherPins');
+            if (storedPins) {
+                appState.pinnedLocations = JSON.parse(storedPins);
+            } else {
+                // Default pin if empty
+                appState.pinnedLocations = [appState.currentLocation];
+                saveToLocalStorage();
+            }
+            
+            const lastLocation = localStorage.getItem('lastLocation');
+            if (lastLocation) {
+                appState.currentLocation = JSON.parse(lastLocation);
+            }
+        }
+
+        function saveToLocalStorage() {
+            localStorage.setItem('weatherPins', JSON.stringify(appState.pinnedLocations));
+            localStorage.setItem('lastLocation', JSON.stringify(appState.currentLocation));
+        }
+
+        // --- STREAMING_CHUNK:API Fetching Logic ---
+        async function fetchWeather() {
+            const { latitude, longitude } = appState.currentLocation;
+            
+            const url = `${WEATHER_API_URL}?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,surface_pressure,wind_speed_10m&hourly=temperature_2m,weather_code,wind_speed_10m,is_day&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=16`;
+
+            showLoading();
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error("Failed to fetch weather data");
+                
+                appState.weatherData = await response.json();
+                appState.selectedDayIndex = 0; // Reset to today on new location
+                
+                updateUI();
+                hideLoading();
+            } catch (error) {
+                console.error(error);
+                showError(error.message);
+            }
+        }
+
+        let searchTimeout;
+        async function searchCity(query) {
+            const resultsContainer = document.getElementById('search-results');
+            const loadingText = document.getElementById('search-loading');
+            
+            if (query.length < 2) {
+                resultsContainer.classList.add('hidden');
+                return;
+            }
+
+            resultsContainer.classList.remove('hidden');
+            resultsContainer.innerHTML = '<div class="p-4 text-center text-sm text-white/50">Searching...</div>';
+
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(async () => {
+                try {
+                    const response = await fetch(`${GEO_API_URL}?name=${encodeURIComponent(query)}&count=5&language=en&format=json`);
+                    const data = await response.json();
+
+                    if (!data.results || data.results.length === 0) {
+                        resultsContainer.innerHTML = '<div class="p-4 text-center text-sm text-white/50">No cities found.</div>';
+                        return;
+                    }
+
+                    renderSearchResults(data.results);
+                } catch (err) {
+                    resultsContainer.innerHTML = '<div class="p-4 text-center text-sm text-red-400">Search failed.</div>';
+                }
+            }, 500); // Debounce
+        }
+
+        // --- STREAMING_CHUNK:UI Rendering Functions ---
+        function renderSearchResults(results) {
+            const container = document.getElementById('search-results');
+            container.innerHTML = '';
+
+            results.forEach(city => {
+                const div = document.createElement('div');
+                div.className = 'p-3 hover:bg-white/10 cursor-pointer flex flex-col border-b border-white/5 last:border-0 transition-colors';
+                
+                const regionStr = [city.admin1, city.country].filter(Boolean).join(', ');
+                
+                div.innerHTML = `
+                    <span class="font-medium text-white">${city.name}</span>
+                    <span class="text-xs text-white/50">${regionStr}</span>
+                `;
+                
+                div.onclick = () => {
+                    selectLocation({
+                        id: city.id,
+                        name: city.name,
+                        country: city.country,
+                        latitude: city.latitude,
+                        longitude: city.longitude,
+                        timezone: city.timezone
+                    });
+                    document.getElementById('search-input').value = '';
+                    document.getElementById('clear-search').classList.add('hidden');
+                    container.classList.add('hidden');
+                };
+                
+                container.appendChild(div);
+            });
+        }
+
+        function renderPinnedLocations() {
+            const container = document.getElementById('pinned-container');
+            container.innerHTML = '';
+
+            if (appState.pinnedLocations.length === 0) {
+                container.innerHTML = '<span class="text-sm text-white/30 italic px-2">No pinned locations</span>';
+                return;
+            }
+
+            appState.pinnedLocations.forEach(loc => {
+                const isCurrent = loc.id === appState.currentLocation.id;
+                
+                const btn = document.createElement('button');
+                btn.className = `flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-all flex items-center gap-2 border 
+                    ${isCurrent 
+                        ? 'bg-blue-500/30 border-blue-400/50 text-white' 
+                        : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/15 hover:text-white'}`;
+                
+                btn.innerHTML = `
+                    <i class="fa-solid fa-location-dot ${isCurrent ? 'text-blue-300' : 'text-white/40'}"></i>
+                    ${loc.name}
+                `;
+                
+                btn.onclick = () => {
+                    if (!isCurrent) selectLocation(loc);
+                };
+                
+                container.appendChild(btn);
+            });
+
+            updatePinButtonState();
+        }
+
+        function updatePinButtonState() {
+            const btn = document.getElementById('pin-btn');
+            const icon = btn.querySelector('i');
+            const isPinned = appState.pinnedLocations.some(loc => loc.id === appState.currentLocation.id);
+            
+            if (isPinned) {
+                btn.classList.add('text-yellow-400', 'bg-white/20');
+                btn.classList.remove('text-white/50', 'bg-white/10');
+                icon.classList.remove('fa-thumbtack');
+                icon.classList.add('fa-star'); // Change icon to star when pinned
+                btn.title = "Unpin Location";
+            } else {
+                btn.classList.remove('text-yellow-400', 'bg-white/20');
+                btn.classList.add('text-white/50', 'bg-white/10');
+                icon.classList.add('fa-thumbtack');
+                icon.classList.remove('fa-star');
+                btn.title = "Pin Location";
+            }
+        }
+
+        // --- STREAMING_CHUNK:Main Weather UI Updates ---
+        function updateMainDate() {
+            const { daily } = appState.weatherData;
+            const selectedDateStr = daily.time[appState.selectedDayIndex];
+            
+            // Format date, ensuring UTC so it doesn't drift by timezone
+            const dateObj = new Date(selectedDateStr + "T12:00:00Z"); 
+            const dateStr = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+            
+            document.getElementById('current-date').textContent = dateStr;
+
+            const todayBtn = document.getElementById('today-btn');
+            if (todayBtn) {
+                if (appState.selectedDayIndex !== 0) {
+                    todayBtn.classList.remove('hidden');
+                } else {
+                    todayBtn.classList.add('hidden');
+                }
+            }
+        }
+
+        function goToToday() {
+            appState.selectedDayIndex = 0;
+            updateMainDate();
+            renderDailyForecast();
+            renderHourlyForecast();
+        }
+
+        function updateUI() {
+            const { current, daily } = appState.weatherData;
+            
+            // 1. Header & Current Conditions
+            const locName = appState.currentLocation.name;
+            const country = appState.currentLocation.country;
+            document.getElementById('location-name').innerHTML = `${locName} <span class="text-xl font-normal text-white/60 ml-2">${country || ''}</span>`;
+            
+            updateMainDate();
+
+            document.getElementById('current-temp').textContent = Math.round(current.temperature_2m);
+            document.getElementById('current-wind').textContent = `${Math.round(current.wind_speed_10m)} km/h`;
+            document.getElementById('current-humidity').textContent = `${Math.round(current.relative_humidity_2m)}%`;
+            document.getElementById('current-feels-like').textContent = `${Math.round(current.apparent_temperature)}°`;
+            document.getElementById('current-pressure').textContent = `${Math.round(current.surface_pressure)} hPa`;
+
+            const wInfo = getWeatherInfo(current.weather_code, current.is_day);
+            document.getElementById('current-desc').textContent = wInfo.desc;
+            document.getElementById('current-icon-container').innerHTML = `<i class="fa-solid ${wInfo.icon} ${wInfo.color}"></i>`;
+            
+            const glow = document.getElementById('weather-glow');
+            glow.className = `absolute -top-32 -right-32 w-80 h-80 rounded-full mix-blend-overlay filter blur-[100px] opacity-40 pointer-events-none transition-colors duration-1000 ${wInfo.glow}`;
+
+            // 2. Render UI sections
+            renderDailyForecast();
+            renderHourlyForecast();
+            renderPinnedLocations(); // Ensure chips reflect active state
+        }
+
+        function renderDailyForecast() {
+            const { daily } = appState.weatherData;
+            const container = document.getElementById('daily-container');
+            container.innerHTML = '';
+
+            for (let i = 0; i < daily.time.length; i++) {
+                const dayName = getDayName(daily.time[i], i);
+                
+                // Extract the day of the month
+                const dateObj = new Date(daily.time[i] + "T12:00:00Z");
+                const dayOfMonth = dateObj.getUTCDate();
+
+                const maxTemp = Math.round(daily.temperature_2m_max[i]);
+                const minTemp = Math.round(daily.temperature_2m_min[i]);
+                const wInfo = getWeatherInfo(daily.weather_code[i], 1);
+                
+                const isActive = i === appState.selectedDayIndex;
+
+                const card = document.createElement('div');
+                // Make the card look clickable and distinct if active
+                card.className = `flex-shrink-0 w-[72px] md:w-[100px] flex flex-col items-center justify-between p-2.5 md:p-4 rounded-xl md:rounded-2xl cursor-pointer select-none 
+                                ${isActive ? 'glass-item active' : 'glass-item'}`;
+                
+                card.innerHTML = `
+                    <div class="flex flex-col items-center mb-1.5 md:mb-3">
+                        <span class="text-xs md:text-sm font-medium ${isActive ? 'text-white' : 'text-white/70'} leading-tight">${dayName}</span>
+                        <span class="text-[10px] md:text-[11px] ${isActive ? 'text-white/90' : 'text-white/50'} mt-0.5">${dayOfMonth}</span>
+                    </div>
+                    <i class="fa-solid ${wInfo.icon} ${wInfo.color} text-2xl md:text-3xl mb-2 md:mb-4 drop-shadow-md transition-transform ${isActive ? 'scale-110' : ''}"></i>
+                    <div class="flex items-center gap-1 md:gap-2 w-full justify-center">
+                        <span class="font-bold text-white text-base md:text-lg">${maxTemp}°</span>
+                        <span class="text-xs md:text-sm text-[#8e9a9f]">${minTemp}°</span>
+                    </div>
+                `;
+
+                card.onclick = () => {
+                    appState.selectedDayIndex = i;
+                    updateMainDate();
+                    renderDailyForecast(); // Re-render to update active classes
+                    renderHourlyForecast(); // Update hourly data
+                };
+
+                container.appendChild(card);
+            }
+        }
+
+        // --- STREAMING_CHUNK:Hourly Filtering Logic ---
+        function renderHourlyForecast() {
+            const { hourly, current, daily } = appState.weatherData;
+            const container = document.getElementById('hourly-container');
+            const dayLabel = document.getElementById('hourly-day-label');
+            container.innerHTML = '';
+
+            const dayIndex = appState.selectedDayIndex;
+            dayLabel.textContent = getDayName(daily.time[dayIndex], dayIndex);
+
+            let hoursToDisplay = [];
+
+            if (dayIndex === 0) {
+                // For "Today", find current hour and show next 24 hours
+                const currentTimeStr = current.time;
+                let currentHourIndex = hourly.time.findIndex(timeStr => timeStr >= currentTimeStr);
+                
+                if (currentHourIndex === -1) currentHourIndex = 0;
+                
+                // Show exactly 24 hours from the current hour
+                for (let i = currentHourIndex; i < currentHourIndex + 24; i++) {
+                     // Ensure we don't exceed the available data
+                    if (i < hourly.time.length) {
+                        hoursToDisplay.push(i);
+                    }
+                }
+            } else {
+                 // For future days, show 24 hours starting from 00:00 of that day
+                 const startIndex = dayIndex * 24;
+                 for (let i = startIndex; i < startIndex + 24; i++) {
+                     if (i < hourly.time.length) {
+                         hoursToDisplay.push(i);
+                     }
+                 }
+            }
+
+            // Render the items
+            hoursToDisplay.forEach(idx => {
+                const timeStr = formatTime(hourly.time[idx]);
+                const temp = Math.round(hourly.temperature_2m[idx]);
+                const wInfo = getWeatherInfo(hourly.weather_code[idx], hourly.is_day[idx]);
+                
+                // Check if this hour is midnight to add a vertical separator line
+                const isMidnight = timeStr === '12 AM' && idx !== hoursToDisplay[0];
+                if (isMidnight) {
+                    const divider = document.createElement('div');
+                    divider.className = 'flex-shrink-0 w-[1px] bg-white/10 self-stretch my-1 md:my-2 mx-1 md:mx-2 rounded-full';
+                    container.appendChild(divider);
+                }
+
+                const item = document.createElement('div');
+                item.className = 'flex-shrink-0 flex flex-col items-center px-1 md:px-2 rounded-xl min-w-[50px] md:min-w-[64px] pointer-events-none relative';
+                
+                item.innerHTML = `
+                    <span class="text-[10px] md:text-[11px] font-semibold text-[#8e9a9f] mb-1.5 md:mb-3">${timeStr}</span>
+                    <i class="fa-solid ${wInfo.icon} ${wInfo.color} text-xl md:text-3xl mb-1.5 md:mb-3 drop-shadow-sm"></i>
+                    <span class="font-bold text-base md:text-lg text-white">${temp}°</span>
+                `;
+                container.appendChild(item);
+            });
+            
+            // Scroll hourly container back to left on day change
+            container.scrollTo({ left: 0, behavior: 'smooth' });
+        }
+
+        // --- STREAMING_CHUNK:Interaction Handlers ---
+        function selectLocation(loc) {
+            appState.currentLocation = loc;
+            saveToLocalStorage();
+            fetchWeather();
+        }
+
+        function togglePin() {
+            const locId = appState.currentLocation.id;
+            const existingIndex = appState.pinnedLocations.findIndex(l => l.id === locId);
+            
+            if (existingIndex >= 0) {
+                // Unpin
+                appState.pinnedLocations.splice(existingIndex, 1);
+            } else {
+                // Pin
+                appState.pinnedLocations.push(appState.currentLocation);
+            }
+            
+            saveToLocalStorage();
+            renderPinnedLocations();
+        }
+
+        function showLoading() {
+            document.getElementById('loading-state').classList.remove('hidden');
+            const content = document.getElementById('weather-content');
+            content.classList.add('hidden');
+            content.classList.remove('opacity-100');
+            document.getElementById('error-state').classList.add('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-state').classList.add('hidden');
+            const content = document.getElementById('weather-content');
+            content.classList.remove('hidden');
+            setTimeout(() => {
+                content.classList.add('opacity-100');
+            }, 50);
+        }
+
+        function showError(msg) {
+            document.getElementById('loading-state').classList.add('hidden');
+            document.getElementById('error-state').classList.remove('hidden');
+            document.getElementById('error-message').textContent = msg;
+        }
+
+        function retryFetch() {
+            fetchWeather();
+        }
+
+        // --- STREAMING_CHUNK:Event Listeners & Init ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Setup Search
+            const searchInput = document.getElementById('search-input');
+            const clearBtn = document.getElementById('clear-search');
+            const searchResults = document.getElementById('search-results');
+
+            searchInput.addEventListener('input', (e) => {
+                const val = e.target.value.trim();
+                if (val) {
+                    clearBtn.classList.remove('hidden');
+                    searchCity(val);
+                } else {
+                    clearBtn.classList.add('hidden');
+                    searchResults.classList.add('hidden');
+                }
+            });
+
+            clearBtn.addEventListener('click', () => {
+                searchInput.value = '';
+                clearBtn.classList.add('hidden');
+                searchResults.classList.add('hidden');
+                searchInput.focus();
+            });
+
+            // Close search dropdown when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+                    searchResults.classList.add('hidden');
+                }
+            });
+
+            // Setup Pin Button
+            document.getElementById('pin-btn').addEventListener('click', togglePin);
+            
+            // --- STREAMING_CHUNK:Drag to Scroll Logic ---
+            function setupDragToScroll(containerId) {
+                const container = document.getElementById(containerId);
+                if (!container) return;
+
+                let isDown = false;
+                let startX;
+                let scrollLeft;
+                let velocity = 0;
+                let momentumID;
+                let lastMouseX;
+                let lastTime;
+                let isDragging = false; // Flag to distinguish drag from click
+
+                container.addEventListener('mousedown', (e) => {
+                    isDown = true;
+                    isDragging = false;
+                    container.classList.add('cursor-grabbing');
+                    container.classList.remove('cursor-grab');
+                    startX = e.pageX - container.offsetLeft;
+                    scrollLeft = container.scrollLeft;
+                    
+                    // Reset momentum variables
+                    cancelAnimationFrame(momentumID);
+                    lastMouseX = e.pageX;
+                    lastTime = performance.now();
+                    velocity = 0;
+                });
+                
+                container.addEventListener('mouseleave', () => {
+                    if (isDown) {
+                        isDown = false;
+                        container.classList.remove('cursor-grabbing');
+                        container.classList.add('cursor-grab');
+                        applyMomentum();
+                    }
+                });
+                
+                container.addEventListener('mouseup', () => {
+                    if (isDown) {
+                        isDown = false;
+                        container.classList.remove('cursor-grabbing');
+                        container.classList.add('cursor-grab');
+                        applyMomentum();
+                    }
+                });
+                
+                container.addEventListener('mousemove', (e) => {
+                    if (!isDown) return;
+                    e.preventDefault();
+                    const x = e.pageX - container.offsetLeft;
+                    const walk = (x - startX);
+                    
+                    // If moved more than 3 pixels, it's a drag, not a click
+                    if (Math.abs(walk) > 3) {
+                        isDragging = true;
+                    }
+                    
+                    container.scrollLeft = scrollLeft - walk;
+                    
+                    // Calculate velocity for inertia
+                    const now = performance.now();
+                    const dt = now - lastTime;
+                    if (dt > 0) {
+                        const dx = e.pageX - lastMouseX;
+                        velocity = dx / dt;
+                    }
+                    lastMouseX = e.pageX;
+                    lastTime = now;
+                });
+
+                // Prevent click on inner items if we were dragging
+                container.addEventListener('click', (e) => {
+                    if (isDragging) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                    }
+                }, { capture: true });
+
+                function applyMomentum() {
+                    const friction = 0.95; 
+                    function step() {
+                        if (Math.abs(velocity) > 0.1) {
+                            container.scrollLeft -= velocity * 16;
+                            velocity *= friction;
+                            momentumID = requestAnimationFrame(step);
+                        }
+                    }
+                    momentumID = requestAnimationFrame(step);
+                }
+            }
+
+            // Apply drag-to-scroll to both containers
+            setupDragToScroll('hourly-container');
+            setupDragToScroll('daily-container');
+
+            // Initialize App
+            loadFromLocalStorage();
+            fetchWeather();
+        });
+
+        // --- STREAMING_CHUNK:PWA Service Worker Registration ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch((err) => {
+                    console.warn('Service worker registration failed:', err);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
